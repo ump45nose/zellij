@@ -3768,6 +3768,19 @@ mod server_socket_tests {
     }
 }
 
+fn adopt_desktop_display_env(host_terminal_env: &BTreeMap<String, String>) {
+    let Some(display_env) = zellij_utils::input::cli_assets::desktop_display_env(host_terminal_env)
+    else {
+        return;
+    };
+    for (name, value) in display_env {
+        match value {
+            Some(value) => std::env::set_var(name, value),
+            None => std::env::remove_var(name),
+        }
+    }
+}
+
 pub fn start_server_impl(
     mut os_input: Box<dyn ServerOsApi>,
     socket_path: PathBuf,
@@ -3784,6 +3797,7 @@ pub fn start_server_impl(
         .file_name()
         .map(|f| f.to_string_lossy().to_string())
         .unwrap_or_default();
+    envs::set_session_id(&session_id);
     let session_was_resurrected = !session_id.is_empty()
         && zellij_utils::consts::session_layout_cache_file_name(&session_id).exists();
 
@@ -3924,6 +3938,7 @@ pub fn start_server_impl(
                     _ => false,
                 };
                 let host_terminal_env = cli_assets.host_terminal_env.clone();
+                adopt_desktop_display_env(&host_terminal_env);
                 let in_desktop_terminal = host_terminal_env
                     .contains_key(zellij_utils::input::cli_assets::DESKTOP_TERMINAL_ENV_KEY);
                 let switch_context = cli_assets.switch_context.clone().unwrap_or_default();
@@ -3945,25 +3960,27 @@ pub fn start_server_impl(
                     };
                 let created_from_welcome_screen = switch_context.startup_card
                     == Some(zellij_utils::input::attention::StartupCard::Never);
-                let should_launch_setup_wizard = session_may_show_setup(
-                    is_resumed_session,
-                    layout_is_welcome_screen,
-                    created_from_welcome_screen,
-                    initial_panes
-                        .as_ref()
-                        .map(|p| !p.is_empty())
-                        .unwrap_or(false),
-                )
-                    && zellij_utils::desktop_integration::platform::should_offer_setup(
-                        successfully_written_config,
-                    );
-
                 let runtime_config_options = match &cli_assets.configuration_options {
                     Some(configuration_options) => {
                         config.options.merge(configuration_options.clone())
                     },
                     None => config.options.clone(),
                 };
+
+                let should_launch_setup_wizard =
+                    runtime_config_options.show_setup_screen.unwrap_or(true)
+                        && session_may_show_setup(
+                            is_resumed_session,
+                            layout_is_welcome_screen,
+                            created_from_welcome_screen,
+                            initial_panes
+                                .as_ref()
+                                .map(|p| !p.is_empty())
+                                .unwrap_or(false),
+                        )
+                        && zellij_utils::desktop_integration::platform::should_offer_setup(
+                            successfully_written_config,
+                        );
 
                 let client_attributes = ClientAttributes {
                     size: cli_assets.terminal_window_size,
@@ -4211,6 +4228,7 @@ pub fn start_server_impl(
                 };
                 let config = session_data.session_configuration.saved_config.clone();
                 let host_terminal_env = cli_assets.host_terminal_env.clone();
+                adopt_desktop_display_env(&host_terminal_env);
                 let is_a_reattach = !session_state
                     .read()
                     .unwrap()
